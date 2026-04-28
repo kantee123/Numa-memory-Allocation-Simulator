@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>NUMA Memory Allocation Simulator</title>
+
+<!-- Chart.js for Gantt -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+body {
+  margin: 0;
+  font-family: 'Segoe UI', sans-serif;
+  background: linear-gradient(135deg, #0f172a, #1e293b);
+  color: white;
+}
+
+h1 {
+  text-align: center;
+  margin-top: 20px;
+}
+
+.controls {
+  text-align: center;
+  margin: 20px;
+}
+
+button {
+  margin: 10px;
+  padding: 12px 20px;
+  border-radius: 25px;
+  border: none;
+  cursor: pointer;
+  background: linear-gradient(135deg, #3b82f6, #06b6d4);
+  color: white;
+  transition: 0.3s;
+}
+
+button:hover {
+  transform: scale(1.1);
+}
+
+.main {
+  display: flex;
+  justify-content: space-around;
+  padding: 20px;
+}
+
+.numa-container {
+  display: flex;
+  gap: 30px;
+}
+
+.node {
+  background: rgba(255,255,255,0.08);
+  padding: 20px;
+  border-radius: 12px;
+  width: 200px;
+}
+
+.memory-block {
+  margin: 6px 0;
+  padding: 10px;
+  border-radius: 8px;
+  text-align: center;
+}
+
+.free { background: #334155; }
+.local { background: #22c55e; }
+.remote { background: #ef4444; }
+
+.side {
+  width: 300px;
+}
+
+.log {
+  max-height: 150px;
+  overflow-y: auto;
+  font-size: 14px;
+}
+
+.stats {
+  margin-top: 15px;
+  padding: 10px;
+  background: rgba(255,255,255,0.08);
+  border-radius: 10px;
+}
+</style>
+</head>
+
+<body>
+
+<h1>NUMA Memory Allocation Simulator</h1>
+
+<div class="controls">
+  <button onclick="allocateProcess()">Allocate</button>
+  <button onclick="simulateAccess()">Simulate</button>
+  <button onclick="optimizeMemory()">Optimize</button>
+</div>
+
+<div class="main">
+
+  <!-- NUMA -->
+  <div class="numa-container" id="numaContainer"></div>
+
+  <!-- SIDE PANEL -->
+  <div class="side">
+
+    <div class="stats">
+      <h3>Results</h3>
+      <p id="avgLatency">Avg Latency: 0</p>
+      <p id="processCount">Processes: 0</p>
+      <p id="localCount"></p>
+      <p id="remoteCount"></p>
+      <p id="efficiency"></p>
+    </div>
+
+    <div class="log" id="log">
+      <h3>Logs</h3>
+    </div>
+
+  </div>
+</div>
+
+<!-- Gantt Chart -->
+<h3 style="text-align:center">Process Execution Timeline</h3>
+<canvas id="ganttChart"></canvas>
+
+<script>
+const nodes = [
+  { id: 0, memory: [0,0,0,0] },
+  { id: 1, memory: [0,0,0,0] }
+];
+
+let processes = [];
+let pid = 1;
+let time = 0;
+let chart;
+
+// Render UI
+function renderNodes() {
+  const container = document.getElementById("numaContainer");
+  container.innerHTML = "";
+
+  nodes.forEach(node => {
+    const div = document.createElement("div");
+    div.className = "node";
+    div.innerHTML = `<h3>Node ${node.id}</h3>`;
+
+    node.memory.forEach(block => {
+      const b = document.createElement("div");
+
+      if (block === 0) {
+        b.className = "memory-block free";
+        b.innerText = "Free";
+      } else {
+        let p = processes.find(x => x.pid === block);
+        b.innerText = "P" + block;
+
+        if (p.node === p.preferred)
+          b.className = "memory-block local";
+        else
+          b.className = "memory-block remote";
+      }
+
+      div.appendChild(b);
+    });
+
+    container.appendChild(div);
+  });
+}
+
+// Allocate
+function allocateProcess() {
+  let preferred = Math.floor(Math.random()*2);
+  let placed = false;
+
+  for (let i=0;i<4;i++) {
+    if (nodes[preferred].memory[i]===0) {
+      nodes[preferred].memory[i]=pid;
+      processes.push({pid,node:preferred,preferred,start:time,end:time+5});
+      log(`P${pid} → Node ${preferred} (Local)`);
+      placed=true;
+      break;
+    }
+  }
+
+  if (!placed) {
+    for (let n of nodes) {
+      for (let i=0;i<4;i++) {
+        if (n.memory[i]===0) {
+          n.memory[i]=pid;
+          processes.push({pid,node:n.id,preferred,start:time,end:time+5});
+          log(`P${pid} → Node ${n.id} (Remote ⚠️)`);
+          placed=true;
+          break;
+        }
+      }
+      if (placed) break;
+    }
+  }
+
+  pid++;
+  time += 2;
+
+  renderNodes();
+  updateStats();
+  updateResults();
+  updateChart();
+}
+
+// Simulate
+function simulateAccess() {
+  processes.forEach(p=>{
+    let latency = (p.node===p.preferred)?10:100;
+    log(`P${p.pid} latency: ${latency}ns`);
+  });
+  updateStats();
+}
+
+// Optimize (migration)
+function optimizeMemory() {
+  processes.forEach(p=>{
+    if (p.node!==p.preferred) {
+      let target = nodes[p.preferred];
+
+      for (let i=0;i<4;i++) {
+        if (target.memory[i]===0) {
+
+          nodes[p.node].memory =
+            nodes[p.node].memory.map(x=>x===p.pid?0:x);
+
+          target.memory[i]=p.pid;
+          p.node=p.preferred;
+
+          log(`Migrated P${p.pid} → Node ${p.preferred}`);
+          break;
+        }
+      }
+    }
+  });
+
+  renderNodes();
+  updateStats();
+  updateResults();
+}
+
+// Stats
+function updateStats() {
+  let total=0;
+  processes.forEach(p=>{
+    total += (p.node===p.preferred)?10:100;
+  });
+
+  let avg = processes.length? total/processes.length:0;
+
+  document.getElementById("avgLatency").innerText =
+    `Avg Latency: ${avg.toFixed(2)} ns`;
+
+  document.getElementById("processCount").innerText =
+    `Processes: ${processes.length}`;
+}
+
+// Results
+function updateResults() {
+  let local=0, remote=0;
+
+  processes.forEach(p=>{
+    if (p.node===p.preferred) local++;
+    else remote++;
+  });
+
+  let efficiency = processes.length?
+    (local/processes.length)*100:0;
+
+  document.getElementById("localCount").innerText =
+    `Local: ${local}`;
+
+  document.getElementById("remoteCount").innerText =
+    `Remote: ${remote}`;
+
+  document.getElementById("efficiency").innerText =
+    `Efficiency: ${efficiency.toFixed(2)}%`;
+}
+
+// Chart
+function updateChart() {
+  const ctx = document.getElementById("ganttChart");
+
+  const labels = processes.map(p=>"P"+p.pid);
+  const data = processes.map(p=>p.end);
+
+  if (chart) chart.destroy();
+
+  chart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: labels,
+      datasets: [{
+        label: "Execution Time",
+        data: data
+      }]
+    },
+    options: {
+      indexAxis: 'y'
+    }
+  });
+}
+
+// Log
+function log(msg) {
+  document.getElementById("log").innerHTML += `<p>${msg}</p>`;
+}
+
+renderNodes();
+</script>
+
+</body>
+</html>
